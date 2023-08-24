@@ -61,6 +61,7 @@ class DeephavenFigureConnection(MessageStream):
         Returns:
             None
         """
+        print("on_data")
         result_payload, result_references = self.figure_listener.execute(payload, references)
         self.client_connection.on_data(result_payload, result_references)
 
