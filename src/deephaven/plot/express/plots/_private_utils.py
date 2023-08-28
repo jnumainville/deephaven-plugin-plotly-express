@@ -8,14 +8,12 @@ import copy
 import plotly.express as px
 
 from deephaven.table import Table, PartitionedTable
-from deephaven import time_table
 from deephaven.execution_context import get_exec_ctx
-from deephaven.table_listener import listen
 
 from ._layer import layer
 from .PartitionManager import PartitionManager
 from ._update_wrapper import unsafe_figure_update_wrapper
-from ..deephaven_figure import generate_figure, DeephavenFigure, DeephavenFigureListener
+from ..deephaven_figure import generate_figure, DeephavenFigure
 from ..shared import args_copy
 from ._update_wrapper import default_callback
 
@@ -283,10 +281,6 @@ def process_args(
     on_update = new_fig.initialize_listener(
         table=table, orig_func=orig_func, orig_args=orig_args, exec_ctx=exec_ctx
     )
-
-    #if isinstance(table, PartitionedTable):
-        # only need to listen if it is possible that partitions will be added
-        #listen(table.table, on_update)
 
     return new_fig
 
