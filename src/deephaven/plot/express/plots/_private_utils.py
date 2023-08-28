@@ -284,9 +284,9 @@ def process_args(
         table=table, orig_func=orig_func, orig_args=orig_args, exec_ctx=exec_ctx
     )
 
-    if isinstance(table, PartitionedTable):
+    #if isinstance(table, PartitionedTable):
         # only need to listen if it is possible that partitions will be added
-        listen(table.table, on_update)
+        #listen(table.table, on_update)
 
     return new_fig
 

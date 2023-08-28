@@ -135,7 +135,6 @@ class DeephavenFigureListener:
 
     def __init__(self, table, orig_func, orig_args, exec_ctx):
         self.table = table
-        self.partitions = self.partition_count()
         self.deephaven_figure = None
         self.orig_func = orig_func
         # these args should always be copied before use to prevent
@@ -150,36 +149,12 @@ class DeephavenFigureListener:
         self.exporter = Exporter()
         self.exec_ctx = exec_ctx
 
-    def partition_count(self):
-        if isinstance(self.table, PartitionedTable):
-            return len(self.table.constituent_tables)
-        return -1
-
     def new_figure(self, table):
         new_args = args_copy(self.orig_args)
         new_args["args"]["table"] = table
         new_fig, _ = self.orig_func(**new_args)
         return new_fig
 
-
-    def on_update(self, update, is_replay) -> None:
-        # because this is listening to the partitioned meta table, it will
-        # always trigger a rerender
-        with self.exec_ctx:
-            new_fig = self.new_figure(self.table)
-
-            if self.connection:
-                # attempt to send
-                message = {
-                    "type": "NEW_FIGURE",
-                    "figure": new_fig.to_dict(exporter=self.exporter)
-                }
-
-                self.connection.on_data(
-                    json.dumps(message).encode(),
-                    self.exporter.reference_list())
-
-            return new_fig
 
 
 class DeephavenFigure:
@@ -309,8 +284,11 @@ class DeephavenFigure:
         return json.dumps(payload)
 
     def initialize_listener(self, table, orig_func, orig_args, exec_ctx):
-        self._listener = DeephavenFigureListener(table, orig_func, orig_args, exec_ctx)
-        return self.on_update
+        #self._listener = DeephavenFigureListener(table, orig_func, orig_args, exec_ctx)
+        self.table = table
+        self.orig_func = orig_func
+        self.orig_args = orig_args
+        self.exec_ctx = exec_ctx
 
     def on_update(self, update, is_replay):
         if self._listener is None:
@@ -327,60 +305,4 @@ class DeephavenFigure:
             self.has_color = new_fig.has_color
             self._data_mappings = new_fig._data_mappings
             self.has_subplots = new_fig.has_subplots
-
-    def _execute(
-            self: DeephavenFigureListener,
-            payload: bytes,
-            references: list[Any]
-    ) -> tuple[bytes, list[Any]]:
-        """Execute the DeephavenFigure
-
-        Args:
-          payload: bytes: The payload to execute
-          references: list[Any]: The references to use
-
-        Returns:
-          tuple[bytes, list[Any]]: The result payload and references
-
-        """
-        # todo: figure out what can be received here
-        return payload, references
-
-
-
-
-    def _handle_filter_figure(self, message, references):
-        with self._fig_lock:
-            new_fig = self._listener.on_update(None, None)
-        filters = message["filters"]
-
-        table = self._listener.table
-        columns = None
-        if isinstance(table, PartitionedTable):
-            columns = table.key_columns
-            # this merge, filter, and remerge is likely not ideal for many cases
-            # but it is the easiest way to get the correct filtered partitions
-            # this processing could possibly be done in the PartitionManager on
-            # the original table, but if the original table is partitioned
-            # anyways this workflow is still necessary
-            table = merge(table.constituent_tables)
-
-        new_table = table.where(filters)
-
-        if columns:
-            new_table = new_table.partition_by(columns)
-
-        return self._listener.new_figure(new_table)
-
-    def _handle_retrieve_figure(self, message, references):
-        pass
-
-    def _process_message(self, payload, references):
-        message = json.loads(payload.decode())
-        if message["type"] == "FILTER":
-            return self._handle_filter_figure(message, references)
-            pass
-        elif message["type"] == "RETRIEVE":
-            return self._handle_retrieve_figure(message, references)
-            pass
 
