@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+from functools import partial
 from typing import Any
 
 from deephaven.plugin import Registration, Callback
@@ -51,40 +52,43 @@ from .shared import args_copy
 NAME = "deephaven.plot.express.DeephavenFigure"
 
 
-class DeephavenFigureListener(TableListener):
+class DeephavenFigureListener:
     def __init__(self, figure, connection):
         self.connection: MessageStream = connection
         self.figure = figure
         self.exporter = Exporter()
-        self.fig_lock = threading.Lock()
 
-    def new_figure(
+        self.listeners = []
+
+        head_node = figure.get_head_node()
+        self.partitioned_tables = head_node.partitioned_tables
+        self.filters = head_node.filters
+
+        for table, node in self.partitioned_tables.values():
+            listener = partial(self.on_update, node)
+            self.listeners.append(listen(table.table, listener))
+
+        self.figure.listener = self
+
+
+    def get_figure(
             self,
-            table: Table | PartitionedTable
     ):
-        new_args = args_copy(self.figure.orig_args)
-        new_args["args"]["table"] = table
-        new_fig, _ = self.figure.orig_func(**new_args)
-        return new_fig
+        return self.figure.get_figure()
 
-    def on_update(self, update, is_replay):
+    def on_update(self, node, update, is_replay):
         # because this is listening to the partitioned meta table, it will
         # always trigger a rerender
-        print("sending update")
-        with self.figure.exec_ctx:
-            new_fig = self.new_figure(self.figure.table)
-
-            if self.connection:
-                self.connection.on_data(*self._build_figure_message(new_fig))
-
-            return new_fig
+        if self.connection:
+            node.recreate_figure()
+            self.connection.on_data(*self._build_figure_message(self.get_figure()))
 
     def _handle_retrieve_figure(
             self,
             message: dict[str, Any],
             references: list[Any]
     ) -> tuple[bytes, list[Any]]:
-        return self._build_figure_message(self.new_figure(self.figure.table))
+        return self._build_figure_message(self.get_figure())
 
     def _build_figure_message(self, figure) -> tuple[bytes, list[Any]]:
         message = {
@@ -93,6 +97,19 @@ class DeephavenFigureListener(TableListener):
         }
 
         return json.dumps(message).encode(), self.exporter.reference_list()
+
+
+    def _handle_filter(
+            self,
+            message: dict[str, Any],
+            references: list[Any]
+    ) -> tuple[bytes, list[Any]]:
+        if (fid := message["filter_id"]) in self.filters:
+            value = message["value"]
+            self.filters[message[fid]].recreate_figure(
+                message["filter"], new_filter_value=value)
+
+            return self._build_figure_message(self.figure.get_figure())
 
     def _process_message(
             self,
@@ -103,20 +120,13 @@ class DeephavenFigureListener(TableListener):
         if message["type"] == "RETRIEVE":
             return self._handle_retrieve_figure(message, references)
             pass
-
-def listener_function(update, is_replay):
-    print(f"FUNCTION LISTENER: update={update}")
-    print(f"is_replay: {is_replay}")
-
+        elif message["type"] == "FILTER":
+            pass
 
 class DeephavenFigureConnection(MessageStream):
     def __init__(self, figure: DeephavenFigure, client_connection: MessageStream):
         super().__init__()
         self._listener = DeephavenFigureListener(figure, client_connection)
-        table = figure.table
-        if isinstance(table, PartitionedTable):
-            listen(table.table, self._listener)
-            figure.listener = self._listener
         self.client_connection = client_connection
 
     def on_data(self, payload: bytes, references: list[Any]) -> tuple[bytes, list[Any]]:

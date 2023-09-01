@@ -102,7 +102,8 @@ CUSTOM_ARGS = {
     "hist_val_name",
     "pivot_vars",
     "current_partition",
-    "colors"
+    "colors",
+    "unsafe_update_figure",
 }
 
 # these are columns that are "attached" sequentially to the traces

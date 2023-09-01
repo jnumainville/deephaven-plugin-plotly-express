@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import json
 import threading
+from abc import abstractmethod
 from collections.abc import Generator
+from copy import copy, deepcopy
 from typing import Callable, Any
 from plotly.graph_objects import Figure
 
-
+from ..shared import args_copy
 from ..data_mapping import DataMapping
+
+from deephaven.table import Table, PartitionedTable
+
 
 class Reference:
     """A reference to an object
@@ -24,6 +29,7 @@ class Reference:
     ):
         self.index = index
         self.obj = obj
+
 
 class Exporter:
 
@@ -61,7 +67,6 @@ class Exporter:
 
             """
         return list(self.references.keys())
-
 
 
 def export_figure(
@@ -125,6 +130,186 @@ def has_arg(
     # check is either a function or string
 
 
+# todo: make sure we listen to all rerenders then return
+
+class DeephavenNode:
+    @abstractmethod
+    def recreate_figure(self):
+        pass
+
+    @abstractmethod
+    def copy(self, parent, partitioned_tables, filters):
+        pass
+
+    @abstractmethod
+    def get_figure(self):
+        pass
+
+
+
+class DeephavenFigureNode(DeephavenNode):
+    def __init__(self, parent, exec_ctx, args, table, func):
+        # function, execution ctx, args, table
+        # if partitioned then add a listener linked to this node
+        self.parent = parent
+        self.exec_ctx = exec_ctx
+        self.args = args
+        self.table = table
+        self.func = func
+        self.cached_figure = None
+        self.node_lock = threading.Lock()
+        self.filter_value = None
+        pass
+
+    def recreate_figure(
+            self,
+            new_filter_value=None,
+            update_parent=True
+    ):
+        """
+        Recreate the figure. This is called when the underlying partition or
+        filtered table changes
+
+        Returns:
+
+        """
+        with self.exec_ctx, self.node_lock:
+            if not new_filter_value:
+                new_filter_value = self.filter_value
+            else:
+                self.filter_value = new_filter_value
+
+            table = self.table
+            if new_filter_value:
+                table.filter(new_filter_value)
+            self.args["args"]["table"] = table
+            self.cached_figure = self.func(**self.args)
+
+        if update_parent:
+            self.parent.recreate_figure()
+
+    def copy(self, parent, partitioned_tables, filters):
+        # args need to be copied as the table key is modified
+        new_args = args_copy(self.args)
+        new_node = DeephavenFigureNode(self.parent, self.exec_ctx, new_args, self.table, self.func)
+        if id(self) in partitioned_tables:
+            table, _ = partitioned_tables[id(self)]
+            partitioned_tables.pop(id(self))
+            partitioned_tables[id(new_node)] = (table, new_node)
+        if id(self) in filters:
+            filters.pop(id(self))
+            filters[id(new_node)] = new_node
+
+        new_node.cached_figure = self.cached_figure
+        new_node.parent = parent
+        return new_node
+
+    def get_figure(self):
+        if not self.cached_figure:
+            self.recreate_figure(update_parent=False)
+
+        return self.cached_figure
+
+
+class DeephavenLayerNode(DeephavenNode):
+    def __init__(self, layer_func, args, exec_ctx):
+        self.parent = None
+        self.nodes = []
+        self.layer_func = layer_func
+        self.args = args
+        self.figs = []
+        self.cached_figure = None
+        self.exec_ctx = exec_ctx
+        self.node_lock = threading.Lock()
+        pass
+
+    def recreate_figure(
+            self,
+            update_parent=True
+    ):
+        """
+        Recreate the figure. This is called when the underlying partition or fil
+        tered table changes
+
+        Returns:
+
+        """
+
+        with self.exec_ctx, self.node_lock:
+
+            figs = [node.cached_figure for node in self.nodes]
+            self.cached_figure = self.layer_func(*figs, **self.args)
+
+        if update_parent:
+            self.parent.recreate_figure()
+
+    def copy(
+            self,
+            parent,
+            partitioned_tables,
+            filters
+    ):
+        new_node = DeephavenLayerNode(self.layer_func, self.args, self.exec_ctx)
+        new_node.nodes = [node.copy(partitioned_tables, filters) for node in self.nodes]
+        new_node.cached_figure = self.cached_figure
+        new_node.parent = parent
+        return new_node
+
+    def get_figure(self):
+        if not self.cached_figure:
+            for node in self.nodes:
+                node.get_figure()
+            self.recreate_figure(update_parent=False)
+
+        return self.cached_figure
+
+class DeephavenHeadNode:
+    # traverse up to the head node
+    def __init__(
+            self,
+
+    ):
+        # there is only one child node of the head, either a layer or a figure
+        self.node = None
+        # this should be a set of nodes
+        self.partitioned_tables = {}
+        # note: this will be recalculated with a new graph
+        self.filters = {}
+
+        self.cached_figure = None
+        pass
+
+
+    def copy(self):
+        new_head = DeephavenHeadNode()
+        new_partitioned_tables = copy(self.partitioned_tables)
+        new_filters = copy(self.filters)
+        new_head.node = self.node.copy(new_head, new_partitioned_tables, new_filters)
+        new_head.partitioned_tables = new_partitioned_tables
+        new_head.filters = self.filters
+        return new_head
+
+
+    def recreate_figure(
+            self,
+    ):
+        """
+        Recreate the overall figure. This will be called by a child node when
+        it's figure is updated, and will then update the figure of the parent
+        node. This will continue until the head node is reached. The head node
+        will pull the cached figure from the top child, then the new figure
+        will be sent to the client.
+
+        Returns:
+
+        """
+        self.cached_figure = self.node.cached_figure
+
+    def get_figure(self):
+        if not self.cached_figure:
+            self.cached_figure = self.node.get_figure()
+        return self.cached_figure
+
 
 
 class DeephavenFigure:
@@ -132,19 +317,19 @@ class DeephavenFigure:
     data tables to the plotly figure
 
     Attributes:
-        fig: Figure: (Default value = None) The underlying plotly fig
-        call: Callable: (Default value = None) The (usually) px drawing
+        _plotly_fig: Figure: (Default value = None) The underlying plotly fig
+        _call: Callable: (Default value = None) The (usually) px drawing
           function
-        call_args: dict[Any]: (Default value = None) The arguments that were
+        _call_args: dict[Any]: (Default value = None) The arguments that were
           used to call px
         _data_mappings: list[DataMapping]: (Default value = None) A list of data
           mappings from table column to corresponding plotly variable
-        has_template: bool: (Default value = False) If a template is used
-        has_color: bool: (Default value = False) True if color was manually
+        _has_template: bool: (Default value = False) If a template is used
+        _has_color: bool: (Default value = False) True if color was manually
           applied via discrete_color_sequence
-        trace_generator: Generator[dict[str, Any]]: (Default value = None)
+        _trace_generator: Generator[dict[str, Any]]: (Default value = None)
           A generator for modifications to traces
-        has_subplots: bool: (Default value = False) True if has subplots
+        _has_subplots: bool: (Default value = False) True if has subplots
     """
 
     def __init__(
@@ -159,22 +344,24 @@ class DeephavenFigure:
             has_subplots: bool = False,
     ):
         # keep track of function that called this and it's args
-        self.fig = fig
-        self.call = call
-        self.call_args = call_args
-        self.trace_generator = trace_generator
+        self._head_node = DeephavenHeadNode()
 
-        self.has_template = has_template if has_template else \
+        # note: these variables might not be up to date with the latest
+        # figure if the figure is updated
+        self._plotly_fig = fig
+        self._call = call
+        self._call_args = call_args
+        self._trace_generator = trace_generator
+
+        self._has_template = has_template if has_template else \
             has_arg(call_args, "template")
 
-        self.has_color = has_color if has_color else \
+        self._has_color = has_color if has_color else \
             has_arg(call_args, has_color_args)
 
         self._data_mappings = data_mappings if data_mappings else []
 
-        self.has_subplots = has_subplots
-
-        self._listener = None
+        self._has_subplots = has_subplots
 
         # lock to prevent multiple threads from updating the figure at once
         self._fig_lock = threading.Lock()
@@ -240,12 +427,12 @@ class DeephavenFigure:
           str: The DeephavenFigure as a JSON string
 
         """
-        plotly = json.loads(self.fig.to_json())
+        plotly = json.loads(self._plotly_fig.to_json())
         mappings = self.get_json_links(exporter)
         deephaven = {
             "mappings": mappings,
-            "is_user_set_template": self.has_template,
-            "is_user_set_color": self.has_color
+            "is_user_set_template": self._has_template,
+            "is_user_set_color": self._has_color
         }
         payload = {
             "plotly": plotly,
@@ -253,26 +440,72 @@ class DeephavenFigure:
         }
         return json.dumps(payload)
 
-    def initialize_listener(self, table, orig_func, orig_args, exec_ctx):
-        #self._listener = DeephavenFigureListener(table, orig_func, orig_args, exec_ctx)
-        self.table = table
-        self.orig_func = orig_func
-        self.orig_args = orig_args
-        self.exec_ctx = exec_ctx
+    def get_head_node(self):
+        return self._head_node
 
-    def on_update(self, update, is_replay):
-        if self._listener is None:
-            raise ValueError("Listener not initialized")
+    def add_layer_to_graph(self, layer_func, args, exec_ctx):
+        # create a new layer node
+        # add the layer node to the head node
 
-        with self._fig_lock:
-            new_fig = self._listener.on_update(update, is_replay)
+        new_head = DeephavenHeadNode()
+        self._head_node = new_head
 
-            self.fig = new_fig.fig
-            self.call = new_fig.call
-            self.call_args = new_fig.call_args
-            self.trace_generator = new_fig.trace_generator
-            self.has_template = new_fig.has_template
-            self.has_color = new_fig.has_color
-            self._data_mappings = new_fig._data_mappings
-            self.has_subplots = new_fig.has_subplots
+        layer_node = DeephavenLayerNode(layer_func, args, exec_ctx)
+
+        new_head.node = layer_node
+        layer_node.parent = new_head
+
+        figs = args.pop("figs")
+        children = []
+        partitioned_tables = {}
+        filters = {}
+        for fig in figs:
+            if isinstance(fig, Figure):
+                new_node = DeephavenFigureNode(None, None, None, None, None)
+                children.append(new_node)
+                # this is a plotly figure, so we need to create a new node
+                # but we don't need to recreate it ever
+                new_node.cached_figure = fig
+                pass
+            elif isinstance(fig, DeephavenFigure):
+                tmp_head = fig._head_node.copy()
+                children.append(tmp_head.node)
+                partitioned_tables.update(tmp_head.partitioned_tables)
+                filters.update(tmp_head.filters)
+
+        layer_node.nodes = children
+        new_head.partitioned_tables = partitioned_tables
+        new_head.filters = filters
+
+        for node in children:
+            node.parent = layer_node
+
+
+    def add_figure_to_graph(
+            self,
+            exec_ctx, args, table, func):
+
+        node = DeephavenFigureNode(self._head_node, exec_ctx, args, table, func)
+
+        partitioned_tables = {}
+        if isinstance(table, PartitionedTable):
+            partitioned_tables = {id(node): (table, node)}
+
+        filters = {}
+        if "filter_columns" in args["args"] and args["args"]["filter_columns"]:
+            if not isinstance(table, PartitionedTable):
+                raise ValueError("Filtering is only supported on partitioned "
+                                 "tables")
+            filters = {id(node): node}
+
+
+        self._head_node.node = node
+        self._head_node.partitioned_tables = partitioned_tables
+        self._head_node.filters = filters
+
+    def get_figure(self):
+        return self._head_node.get_figure()
+
+
+
 
