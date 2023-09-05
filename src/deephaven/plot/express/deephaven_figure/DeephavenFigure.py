@@ -129,16 +129,13 @@ def has_arg(
     return False
     # check is either a function or string
 
-
-# todo: make sure we listen to all rerenders then return
-
 class DeephavenNode:
     @abstractmethod
     def recreate_figure(self):
         pass
 
     @abstractmethod
-    def copy(self, parent, partitioned_tables, filters):
+    def copy(self, parent, partitioned_tables):
         pass
 
     @abstractmethod
@@ -158,37 +155,29 @@ class DeephavenFigureNode(DeephavenNode):
         self.func = func
         self.cached_figure = None
         self.node_lock = threading.Lock()
-        self.filter_value = None
         pass
 
     def recreate_figure(
             self,
-            new_filter_value=None,
             update_parent=True
     ):
         """
-        Recreate the figure. This is called when the underlying partition or
-        filtered table changes
+        Recreate the figure. This is called when the underlying partition
+        changes
 
         Returns:
 
         """
         with self.exec_ctx, self.node_lock:
-            if not new_filter_value:
-                new_filter_value = self.filter_value
-            else:
-                self.filter_value = new_filter_value
 
             table = self.table
-            if new_filter_value:
-                table.filter(new_filter_value)
             self.args["args"]["table"] = table
             self.cached_figure = self.func(**self.args)
 
         if update_parent:
             self.parent.recreate_figure()
 
-    def copy(self, parent, partitioned_tables, filters):
+    def copy(self, parent, partitioned_tables):
         # args need to be copied as the table key is modified
         new_args = args_copy(self.args)
         new_node = DeephavenFigureNode(self.parent, self.exec_ctx, new_args, self.table, self.func)
@@ -196,9 +185,6 @@ class DeephavenFigureNode(DeephavenNode):
             table, _ = partitioned_tables[id(self)]
             partitioned_tables.pop(id(self))
             partitioned_tables[id(new_node)] = (table, new_node)
-        if id(self) in filters:
-            filters.pop(id(self))
-            filters[id(new_node)] = new_node
 
         new_node.cached_figure = self.cached_figure
         new_node.parent = parent
@@ -246,16 +232,20 @@ class DeephavenLayerNode(DeephavenNode):
     def copy(
             self,
             parent,
-            partitioned_tables,
-            filters
+            partitioned_tables
     ):
         new_node = DeephavenLayerNode(self.layer_func, self.args, self.exec_ctx)
-        new_node.nodes = [node.copy(partitioned_tables, filters) for node in self.nodes]
+        new_node.nodes = [node.copy(new_node, partitioned_tables) for node in self.nodes]
         new_node.cached_figure = self.cached_figure
         new_node.parent = parent
         return new_node
 
     def get_figure(self):
+        """
+        Get the figure for this node. This will be called by a child node when
+        Returns:
+
+        """
         if not self.cached_figure:
             for node in self.nodes:
                 node.get_figure()
@@ -264,7 +254,6 @@ class DeephavenLayerNode(DeephavenNode):
         return self.cached_figure
 
 class DeephavenHeadNode:
-    # traverse up to the head node
     def __init__(
             self,
 
@@ -273,32 +262,25 @@ class DeephavenHeadNode:
         self.node = None
         # this should be a set of nodes
         self.partitioned_tables = {}
-        # note: this will be recalculated with a new graph
-        self.filters = {}
 
         self.cached_figure = None
         pass
 
 
-    def copy(self):
+    def copy_graph(self):
         new_head = DeephavenHeadNode()
         new_partitioned_tables = copy(self.partitioned_tables)
-        new_filters = copy(self.filters)
-        new_head.node = self.node.copy(new_head, new_partitioned_tables, new_filters)
+        new_head.node = self.node.copy(new_head, new_partitioned_tables)
         new_head.partitioned_tables = new_partitioned_tables
-        new_head.filters = self.filters
         return new_head
 
 
     def recreate_figure(
             self,
-    ):
+    ) -> None:
         """
         Recreate the overall figure. This will be called by a child node when
-        it's figure is updated, and will then update the figure of the parent
-        node. This will continue until the head node is reached. The head node
-        will pull the cached figure from the top child, then the new figure
-        will be sent to the client.
+        it's figure is updated, and will update the figure for this node.
 
         Returns:
 
@@ -306,6 +288,12 @@ class DeephavenHeadNode:
         self.cached_figure = self.node.cached_figure
 
     def get_figure(self):
+        """
+        Get the figure for this node. This will be called by a listener to get
+        the initial figure.
+        Returns:
+
+        """
         if not self.cached_figure:
             self.cached_figure = self.node.get_figure()
         return self.cached_figure
@@ -363,8 +351,6 @@ class DeephavenFigure:
 
         self._has_subplots = has_subplots
 
-        # lock to prevent multiple threads from updating the figure at once
-        self._fig_lock = threading.Lock()
 
     def copy_mappings(
             self: DeephavenFigure,
@@ -443,7 +429,12 @@ class DeephavenFigure:
     def get_head_node(self):
         return self._head_node
 
-    def add_layer_to_graph(self, layer_func, args, exec_ctx):
+    def add_layer_to_graph(
+            self,
+            layer_func,
+            args,
+            exec_ctx
+    ):
         # create a new layer node
         # add the layer node to the head node
 
@@ -458,7 +449,6 @@ class DeephavenFigure:
         figs = args.pop("figs")
         children = []
         partitioned_tables = {}
-        filters = {}
         for fig in figs:
             if isinstance(fig, Figure):
                 new_node = DeephavenFigureNode(None, None, None, None, None)
@@ -468,14 +458,12 @@ class DeephavenFigure:
                 new_node.cached_figure = fig
                 pass
             elif isinstance(fig, DeephavenFigure):
-                tmp_head = fig._head_node.copy()
+                tmp_head = fig._head_node.copy_graph()
                 children.append(tmp_head.node)
                 partitioned_tables.update(tmp_head.partitioned_tables)
-                filters.update(tmp_head.filters)
 
         layer_node.nodes = children
         new_head.partitioned_tables = partitioned_tables
-        new_head.filters = filters
 
         for node in children:
             node.parent = layer_node
@@ -483,7 +471,11 @@ class DeephavenFigure:
 
     def add_figure_to_graph(
             self,
-            exec_ctx, args, table, func):
+            exec_ctx,
+            args,
+            table,
+            func
+    ):
 
         node = DeephavenFigureNode(self._head_node, exec_ctx, args, table, func)
 
@@ -491,20 +483,14 @@ class DeephavenFigure:
         if isinstance(table, PartitionedTable):
             partitioned_tables = {id(node): (table, node)}
 
-        filters = {}
-        if "filter_columns" in args["args"] and args["args"]["filter_columns"]:
-            if not isinstance(table, PartitionedTable):
-                raise ValueError("Filtering is only supported on partitioned "
-                                 "tables")
-            filters = {id(node): node}
-
-
         self._head_node.node = node
         self._head_node.partitioned_tables = partitioned_tables
-        self._head_node.filters = filters
 
     def get_figure(self):
         return self._head_node.get_figure()
+
+    def get_plotly_fig(self):
+        return self._head_node.cached_figure._plotly_fig
 
 
 

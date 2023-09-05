@@ -1,15 +1,12 @@
 from __future__ import annotations
 
 import json
-import threading
 from functools import partial
 from typing import Any
 
 from deephaven.plugin import Registration, Callback
 from deephaven.plugin.object_type import BidirectionalObjectType, MessageStream
-from deephaven.table import Table, PartitionedTable
-from deephaven.table_listener import listen, TableListener
-from deephaven.execution_context import get_exec_ctx
+from deephaven.table_listener import listen
 
 from .deephaven_figure import DeephavenFigure, export_figure, Exporter
 
@@ -62,11 +59,13 @@ class DeephavenFigureListener:
 
         head_node = figure.get_head_node()
         self.partitioned_tables = head_node.partitioned_tables
-        self.filters = head_node.filters
 
-        for table, node in self.partitioned_tables.values():
-            listener = partial(self.on_update, node)
-            self.listeners.append(listen(table.table, listener))
+
+        with self.figure.get_head_node().node.exec_ctx:
+            for table, node in self.partitioned_tables.values():
+                listener = partial(self.on_update, node)
+                pri
+                self.listeners.append(listen(table.table, listener))
 
         self.figure.listener = self
 
@@ -98,19 +97,6 @@ class DeephavenFigureListener:
 
         return json.dumps(message).encode(), self.exporter.reference_list()
 
-
-    def _handle_filter(
-            self,
-            message: dict[str, Any],
-            references: list[Any]
-    ) -> tuple[bytes, list[Any]]:
-        if (fid := message["filter_id"]) in self.filters:
-            value = message["value"]
-            self.filters[message[fid]].recreate_figure(
-                message["filter"], new_filter_value=value)
-
-            return self._build_figure_message(self.figure.get_figure())
-
     def _process_message(
             self,
             payload: bytes,
@@ -119,9 +105,6 @@ class DeephavenFigureListener:
         message = json.loads(payload.decode())
         if message["type"] == "RETRIEVE":
             return self._handle_retrieve_figure(message, references)
-            pass
-        elif message["type"] == "FILTER":
-            pass
 
 class DeephavenFigureConnection(MessageStream):
     def __init__(self, figure: DeephavenFigure, client_connection: MessageStream):
