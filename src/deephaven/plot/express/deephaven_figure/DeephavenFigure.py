@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import json
-import threading
-from abc import abstractmethod
 from collections.abc import Generator
-from copy import copy, deepcopy
 from typing import Callable, Any
 from plotly.graph_objects import Figure
+import threading
+from abc import abstractmethod
+from copy import copy
 
 from ..shared import args_copy
 from ..data_mapping import DataMapping
 
-from deephaven.table import Table, PartitionedTable
+from deephaven.table import PartitionedTable
 
 
 class Reference:
@@ -32,7 +32,9 @@ class Reference:
 
 
 class Exporter:
-
+    """
+    An exporter that keeps track of references to objects that need to be sent
+    """
     def __init__(
             self,
     ):
@@ -129,23 +131,62 @@ def has_arg(
     return False
     # check is either a function or string
 
+
+
 class DeephavenNode:
     @abstractmethod
     def recreate_figure(self):
+        """
+        Recreate the figure. This is called when an underlying partition or
+        child figure changes.
+
+        """
         pass
 
     @abstractmethod
-    def copy(self, parent, partitioned_tables):
+    def copy(
+            self,
+            parent: DeephavenNode | DeephavenHeadNode,
+            partitioned_tables: dict[int, tuple[PartitionedTable, DeephavenNode]]
+    ) -> DeephavenNode:
+        """
+        Copy this node and all children nodes
+
+        Args:
+            parent: DeephavenNode | DeephavenHeadNode: The parent node
+            partitioned_tables:
+                dict[int, tuple[PartitionedTable, DeephavenNode]]:
+                A dictionary mapping node ids to partitioned tables and nodes
+
+        Returns:
+            The new node
+        """
         pass
 
     @abstractmethod
-    def get_figure(self):
-        pass
+    def get_figure(
+            self
+    ) -> DeephavenFigure:
+        """
+        Get the figure for this node. It will be generated if not cached
 
+        Returns: DeephavenFigure: The figure for this node
+        """
+        pass
 
 
 class DeephavenFigureNode(DeephavenNode):
-    def __init__(self, parent, exec_ctx, args, table, func):
+    """
+
+    """
+    def __init__(
+            self,
+            parent,
+            exec_ctx,
+            args,
+            table,
+            func
+    ):
         # function, execution ctx, args, table
         # if partitioned then add a listener linked to this node
         self.parent = parent
@@ -198,7 +239,16 @@ class DeephavenFigureNode(DeephavenNode):
 
 
 class DeephavenLayerNode(DeephavenNode):
-    def __init__(self, layer_func, args, exec_ctx):
+    """
+
+
+    """
+    def __init__(
+            self,
+            layer_func,
+            args,
+            exec_ctx
+    ):
         self.parent = None
         self.nodes = []
         self.layer_func = layer_func
@@ -231,9 +281,20 @@ class DeephavenLayerNode(DeephavenNode):
 
     def copy(
             self,
-            parent,
-            partitioned_tables
-    ):
+            parent: DeephavenNode | DeephavenHeadNode,
+            partitioned_tables: dict[int, tuple[PartitionedTable, DeephavenNode]]
+    ) -> DeephavenLayerNode:
+        """
+        Copy this node and all children nodes
+
+        Args:
+            parent: The parent node
+            partitioned_tables: A dictionary mapping node ids to partitioned tables
+            and nodes that need to be updated
+
+        Returns:
+            The new node
+        """
         new_node = DeephavenLayerNode(self.layer_func, self.args, self.exec_ctx)
         new_node.nodes = [node.copy(new_node, partitioned_tables) for node in self.nodes]
         new_node.cached_figure = self.cached_figure
@@ -252,6 +313,7 @@ class DeephavenLayerNode(DeephavenNode):
             self.recreate_figure(update_parent=False)
 
         return self.cached_figure
+
 
 class DeephavenHeadNode:
     def __init__(

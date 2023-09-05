@@ -60,12 +60,10 @@ class DeephavenFigureListener:
         head_node = figure.get_head_node()
         self.partitioned_tables = head_node.partitioned_tables
 
-
-        with self.figure.get_head_node().node.exec_ctx:
-            for table, node in self.partitioned_tables.values():
-                listener = partial(self.on_update, node)
-                pri
-                self.listeners.append(listen(table.table, listener))
+        for table, node in self.partitioned_tables.values():
+            listener = partial(self.on_update, node)
+            var = listen(table.table, listener)
+            self.listeners.append(var)
 
         self.figure.listener = self
 
@@ -76,6 +74,7 @@ class DeephavenFigureListener:
         return self.figure.get_figure()
 
     def on_update(self, node, update, is_replay):
+        print("on update")
         # because this is listening to the partitioned meta table, it will
         # always trigger a rerender
         if self.connection:
@@ -87,9 +86,26 @@ class DeephavenFigureListener:
             message: dict[str, Any],
             references: list[Any]
     ) -> tuple[bytes, list[Any]]:
+        """
+
+        Args:
+            message:
+            references:
+
+        Returns:
+
+        """
         return self._build_figure_message(self.get_figure())
 
     def _build_figure_message(self, figure) -> tuple[bytes, list[Any]]:
+        """
+
+        Args:
+            figure:
+
+        Returns:
+
+        """
         message = {
             "type": "NEW_FIGURE",
             "figure": figure.to_dict(exporter=self.exporter)
@@ -102,6 +118,15 @@ class DeephavenFigureListener:
             payload: bytes,
             references: list[Any]
     ) -> tuple[bytes, list[Any]]:
+        """
+
+        Args:
+            payload:
+            references:
+
+        Returns:
+
+        """
         message = json.loads(payload.decode())
         if message["type"] == "RETRIEVE":
             return self._handle_retrieve_figure(message, references)
@@ -123,7 +148,10 @@ class DeephavenFigureConnection(MessageStream):
         """
         return self._listener._process_message(payload, references)
 
-    def on_close(self):
+    def on_close(self) -> None:
+        """
+        Close the connection
+        """
         pass
 
 
