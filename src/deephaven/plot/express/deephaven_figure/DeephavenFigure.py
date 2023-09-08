@@ -287,6 +287,10 @@ class DeephavenLayerNode(DeephavenNode):
         """
         Recreate the figure. This is called when the underlying partition
         or a child node changes
+
+        Args:
+            update_parent: bool: (Default value = True)
+            If the parent should be updated
         """
         with self.exec_ctx, self.node_lock:
             figs = [node.cached_figure for node in self.nodes]
@@ -304,12 +308,13 @@ class DeephavenLayerNode(DeephavenNode):
         Copy this node and all children nodes
 
         Args:
-            parent: The parent node
-            partitioned_tables: A dictionary mapping node ids to partitioned tables
-            and nodes that need to be updated
+            parent: DeephavenNode | DeephavenHeadNode: The parent node
+            partitioned_tables: dict[int, tuple[PartitionedTable, DeephavenNode]]:
+              A dictionary mapping node ids to partitioned table and nodes that
+              need to be updated
 
         Returns:
-            The new node
+            DeephavenLayerNode: The new node
         """
         new_node = DeephavenLayerNode(self.layer_func, self.args, self.exec_ctx)
         new_node.nodes = [node.copy(new_node, partitioned_tables) for node in self.nodes]
@@ -369,7 +374,7 @@ class DeephavenHeadNode:
 
     def get_figure(self) -> DeephavenFigure:
         """
-        Get the figure for this node. This will be called by a listener to get
+        Get the figure for this node. This will be called by a communication to get
         the initial figure.
         Returns:
 
@@ -382,21 +387,6 @@ class DeephavenHeadNode:
 class DeephavenFigure:
     """A DeephavenFigure that contains a plotly figure and mapping from Deephaven
     data tables to the plotly figure
-
-    Attributes:
-        _plotly_fig: Figure: (Default value = None) The underlying plotly fig
-        _call: Callable: (Default value = None) The (usually) px drawing
-          function
-        _call_args: dict[Any]: (Default value = None) The arguments that were
-          used to call px
-        _data_mappings: list[DataMapping]: (Default value = None) A list of data
-          mappings from table column to corresponding plotly variable
-        _has_template: bool: (Default value = False) If a template is used
-        _has_color: bool: (Default value = False) True if color was manually
-          applied via discrete_color_sequence
-        _trace_generator: Generator[dict[str, Any]]: (Default value = None)
-          A generator for modifications to traces
-        _has_subplots: bool: (Default value = False) True if has subplots
     """
 
     def __init__(
