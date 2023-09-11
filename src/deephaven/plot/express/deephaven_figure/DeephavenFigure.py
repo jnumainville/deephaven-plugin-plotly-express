@@ -400,14 +400,12 @@ class DeephavenFigure:
             trace_generator: Generator[dict[str, Any]] = None,
             has_subplots: bool = False,
     ):
-        # keep track of function that called this and it's args
+        # keep track of function that called this, and it's args
         self._head_node = DeephavenHeadNode()
 
-        # note: these variables might not be up to date with the latest
+        # note: these variables might not be up-to-date with the latest
         # figure if the figure is updated
         self._plotly_fig = fig
-        self._call = call
-        self._call_args = call_args
         self._trace_generator = trace_generator
 
         self._has_template = has_template if has_template else \
@@ -616,28 +614,6 @@ class DeephavenFigure:
         if not self._head_node:
             return self._trace_generator
         return self._head_node.get_figure().get_trace_generator()
-
-    def get_call_args(self) -> dict[Any]:
-        """
-        Get the call args for this figure
-
-        Returns:
-            dict[Any]: The call args
-        """
-        if not self._head_node:
-            return self._call_args
-        return self._head_node.get_figure().get_call_args()
-
-    def get_call(self) -> Callable:
-        """
-        Get the call function for this figure
-
-        Returns:
-            Callable: The call function
-        """
-        if not self._head_node:
-            return self._call
-        return self._head_node.get_figure().get_call()
 
     def get_has_template(self) -> bool:
         """

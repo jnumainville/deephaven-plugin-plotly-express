@@ -23,7 +23,7 @@ class DeephavenFigureListener:
         self._listeners = []
 
         head_node = figure.get_head_node()
-        self._partitioned_tables = head_node._partitioned_tables
+        self._partitioned_tables = head_node.partitioned_tables
 
         self._setup_listeners()
 

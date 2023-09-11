@@ -560,7 +560,7 @@ class PartitionManager:
         for i, args in enumerate(self.partition_generator()):
             fig = self.draw_figure(call_args=args, trace_generator=trace_generator)
             if not trace_generator:
-                trace_generator = fig._trace_generator
+                trace_generator = fig.get_trace_generator()
 
             facet_key = []
             if "current_partition" in args:
@@ -572,15 +572,15 @@ class PartitionManager:
                     # violin, etc. leads to extra spacing in each marginal
                     # offsetgroup needs to be unique within the subchart as columns
                     # could have the same name
-                    fig._plotly_fig.update_traces(offsetgroup=f"{'-'.join(args['current_partition'])}{i}")
+                    fig.get_plotly_fig().update_traces(offsetgroup=f"{'-'.join(args['current_partition'])}{i}")
                 facet_key.extend([partition.get(self.facet_col, None), partition.get(self.facet_row, None)])
             facet_key = tuple(facet_key)
 
             if "preprocess_hist" in self.groups or "preprocess_violin" in self.groups:
                 if "current_partition" in args:
-                    fig._plotly_fig.update_layout(legend_tracegroupgap=0)
+                    fig.get_plotly_fig().update_layout(legend_tracegroupgap=0)
                 else:
-                    fig._plotly_fig.update_layout(showlegend=False)
+                    fig.get_plotly_fig().update_layout(showlegend=False)
 
             figs.append(fig)
 

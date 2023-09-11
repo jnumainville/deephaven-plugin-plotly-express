@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Any
+from typing import Any, Callable
 
 from plotly.graph_objs import Figure
 
 from ..deephaven_figure import DeephavenFigure
 from ..shared import default_callback, unsafe_figure_update_wrapper
 from deephaven.execution_context import get_exec_ctx
+
 
 def normalize_position(
         position: float,
@@ -437,7 +438,25 @@ def atomic_layer(
         which_layout: int = None,
         specs: list[dict[str, Any]] = None,
         unsafe_update_figure: callable = default_callback,
-):
+) -> DeephavenFigure:
+    """
+    Layers the provided figures. This is an atomic version of layer, so the
+    figures will be layered immediately and not added to the graph. This is
+    used by plot by.
+    See layer for more details about arguments.
+
+    Args:
+        *figs: DeephavenFigure | Figure: The charts to layer
+        which_layout: int:  (Default value = None):
+            See layer
+        specs: list[dict[str, str | bool | list[float]]]:
+            See layer
+        unsafe_update_figure:
+            See layer
+
+    Returns:
+        DeephavenFigure: The layered chart
+    """
     if len(figs) == 0:
         raise ValueError("No figures provided to compose")
 
@@ -469,14 +488,14 @@ def atomic_layer(
 
         elif isinstance(arg, DeephavenFigure):
             offset = len(new_data)
-            if arg._has_subplots:
+            if arg.get_has_subplots():
                 raise NotImplementedError("Cannot currently add figure with subplots as a subplot")
             fig_data, fig_layout = fig_data_and_layout(
-                arg._plotly_fig, i, specs, which_layout, new_axes_start, matches_axes
+                arg.get_plotly_fig(), i, specs, which_layout, new_axes_start, matches_axes
             )
             new_data_mappings += arg.copy_mappings(offset=offset)
-            new_has_template = arg._has_template or new_has_template
-            new_has_color = arg._has_color or new_has_color
+            new_has_template = arg.get_has_template() or new_has_template
+            new_has_color = arg.get_has_color() or new_has_color
 
         else:
             raise TypeError("All arguments must be of type Figure or DeephavenFigure")
@@ -491,7 +510,6 @@ def atomic_layer(
         unsafe_update_figure
     )
 
-    # todo: this doesn't maintain call args, but that isn't currently needed
     return update_wrapper(
         DeephavenFigure(
             fig=new_fig,
@@ -503,11 +521,12 @@ def atomic_layer(
     )
     pass
 
+
 def layer(
         *figs: DeephavenFigure | Figure,
         which_layout: int = None,
         specs: list[dict[str, Any]] = None,
-        unsafe_update_figure: callable = default_callback
+        unsafe_update_figure: Callable = default_callback
 ) -> DeephavenFigure:
     """Layers the provided figures. Be default, the layouts are sequentially
     applied, so the layouts of later figures will override the layouts of early
@@ -531,7 +550,7 @@ def layer(
         atomic: bool:  (Default value = False) If True, this layer call will be
         treated as an atomic part of a figure creation call, and the figure will not be updated until
         This should almost certainly always be False
-      unsafe_update_figure: An update function that takes a plotly figure
+      unsafe_update_figure: Callable: An update function that takes a plotly figure
         as an argument and optionally returns a plotly figure. If a figure is not
         returned, the plotly figure passed will be assumed to be the return value.
         Used to add any custom changes to the underlying plotly figure. Note that

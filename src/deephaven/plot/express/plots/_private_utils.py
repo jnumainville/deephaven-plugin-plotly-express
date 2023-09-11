@@ -271,7 +271,7 @@ def process_args(
     """
     use_args = locals()
     orig_args = args_copy(use_args)
-    orig_func = lambda **argss: create_deephaven_figure(**argss)[0]
+    orig_func = lambda **local_args: create_deephaven_figure(**local_args)[0]
 
     new_fig, table = create_deephaven_figure(**use_args)
 
@@ -342,6 +342,13 @@ def set_all(
         args: dict[str, Any],
         pairs: dict[str, Any]
 ):
+    """
+    Set all the pairs in the args if they are not already set
+
+    Args:
+        args: dict[str, Any]: The args to set the pairs on
+        pairs: dict[str, Any]: The pairs to set
+    """
     for k, v in pairs:
         args.get(k, v)
 
@@ -362,6 +369,18 @@ def shared_marginal(
         groups: set[str],
         **args: Any
 ) -> DeephavenFigure:
+    """
+    Create a marginal figure
+
+    Args:
+        marginal: True if this is a marginal figure, False otherwise
+        func: The function to use to create the figure
+        groups: The groups to apply to the figure
+        **args: Other args to pass to the figure
+
+    Returns:
+        The DeephavenFigure created
+    """
     if not marginal:
         return process_args(args, groups, px_func=func)
     return create_deephaven_figure(args, groups, px_func=func)[0]
@@ -510,11 +529,11 @@ def create_marginal(
     }
 
     fig_marg = marginal_map[marginal](**args)
-    fig_marg._plotly_fig.update_traces(showlegend=False)
+    fig_marg.get_plotly_fig().update_traces(showlegend=False)
 
     if marginal == "rug":
         symbol = "line-ns-open" if which == "x" else "line-ew-open"
-        fig_marg._plotly_fig.update_traces(marker_symbol=symbol, jitter=0)
+        fig_marg.get_plotly_fig().update_traces(marker_symbol=symbol, jitter=0)
 
     return fig_marg
 
