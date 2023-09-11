@@ -392,7 +392,6 @@ class DeephavenFigure:
     def __init__(
             self: DeephavenFigure,
             fig: Figure = None,
-            call: Callable = None,
             call_args: dict[Any] = None,
             data_mappings: list[DataMapping] = None,
             has_template: bool = False,

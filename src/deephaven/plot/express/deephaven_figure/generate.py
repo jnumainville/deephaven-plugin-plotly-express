@@ -1066,7 +1066,6 @@ def generate_figure(
     dh_fig = DeephavenFigure(
         px_fig,
         call_args=call_args,
-        call=draw,
         data_mappings=[data_mapping],
         trace_generator=trace_generator
     )
