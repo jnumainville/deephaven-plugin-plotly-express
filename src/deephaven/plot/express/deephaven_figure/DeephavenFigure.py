@@ -379,7 +379,7 @@ class DeephavenHeadNode:
         Returns:
 
         """
-        if not self.cached_figure:
+        if not self.cached_figure and self.node:
             self.cached_figure = self.node.get_figure()
         return self.cached_figure
 
@@ -589,9 +589,9 @@ class DeephavenFigure:
         Returns:
             Figure: The plotly figure
         """
-        if not self._head_node:
+        if not self.get_figure():
             return self._plotly_fig
-        return self._head_node.get_figure().get_plotly_fig()
+        return self.get_figure().get_plotly_fig()
 
     def get_data_mappings(self) -> list[DataMapping]:
         """
@@ -600,9 +600,9 @@ class DeephavenFigure:
         Returns:
             list[DataMapping]: The data mappings
         """
-        if not self._head_node:
+        if not self.get_figure():
             return self._data_mappings
-        return self._head_node.get_figure().get_data_mappings()
+        return self.get_figure().get_data_mappings()
 
     def get_trace_generator(self) -> Generator[dict[str, Any]]:
         """
@@ -611,9 +611,9 @@ class DeephavenFigure:
         Returns:
             Generator[dict[str, Any]]: The trace generator
         """
-        if not self._head_node:
+        if not self.get_figure():
             return self._trace_generator
-        return self._head_node.get_figure().get_trace_generator()
+        return self.get_figure().get_trace_generator()
 
     def get_has_template(self) -> bool:
         """
@@ -622,9 +622,9 @@ class DeephavenFigure:
         Returns:
             bool: True if has a template, False otherwise
         """
-        if not self._head_node:
+        if not self.get_figure():
             return self._has_template
-        return self._head_node.get_figure().get_has_template()
+        return self.get_figure().get_has_template()
 
     def get_has_color(self) -> bool:
         """
@@ -633,9 +633,9 @@ class DeephavenFigure:
         Returns:
             bool: True if has color, False otherwise
         """
-        if not self._head_node:
+        if not self.get_figure():
             return self._has_color
-        return self._head_node.get_figure().get_has_color()
+        return self.get_figure().get_has_color()
 
     def get_has_subplots(self) -> bool:
         """
@@ -644,8 +644,8 @@ class DeephavenFigure:
         Returns:
             bool: True if has subplots, False otherwise
         """
-        if not self._head_node:
+        if not self.get_figure():
             return self._has_subplots
-        return self._head_node.get_figure().get_has_subplots()
+        return self.get_figure().get_has_subplots()
 
 

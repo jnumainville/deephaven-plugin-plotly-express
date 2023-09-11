@@ -7,7 +7,7 @@ from typing import Any
 from deephaven.plugin.object_type import MessageStream
 from deephaven.table_listener import listen
 
-from src.deephaven.plot.express import Exporter, DeephavenFigure
+from ..deephaven_figure import Exporter, DeephavenFigure
 
 
 class DeephavenFigureListener:
@@ -15,10 +15,11 @@ class DeephavenFigureListener:
     Listener for DeephavenFigure
     """
 
-    def __init__(self, figure, connection):
+    def __init__(self, figure, connection, liveness_scope):
         self._connection: MessageStream = connection
         self._figure = figure
         self._exporter = Exporter()
+        self._liveness_scope = liveness_scope
 
         self._listeners = []
 
@@ -32,9 +33,9 @@ class DeephavenFigureListener:
         Setup listeners for the partitioned tables
         """
         for table, node in self._partitioned_tables.values():
-            listener = partial(self._on_update, node)
-            var = listen(table.table, listener)
-            self._listeners.append(var)
+            listen_func = partial(self._on_update, node)
+            handle = listen(table.table, listen_func)
+            self._liveness_scope.manage(handle.listener)
 
         self._figure.listener = self
 

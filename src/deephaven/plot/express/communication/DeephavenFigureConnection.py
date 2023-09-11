@@ -4,17 +4,22 @@ from typing import Any
 
 from deephaven.plugin.object_type import MessageStream
 
-from src.deephaven.plot.express import DeephavenFigure
+from ..deephaven_figure import DeephavenFigure
 from .DeephavenFigureListener import DeephavenFigureListener
+import jpy
 
 
 class DeephavenFigureConnection(MessageStream):
     """
     Connection for DeephavenFigure
     """
+
     def __init__(self, figure: DeephavenFigure, client_connection: MessageStream):
         super().__init__()
-        self._listener = DeephavenFigureListener(figure, client_connection)
+        JLivenessScope = jpy.get_type("io.deephaven.engine.liveness.LivenessScope")
+        self._liveness_scope = JLivenessScope()
+
+        self._listener = DeephavenFigureListener(figure, client_connection, self._liveness_scope)
         self._client_connection = client_connection
 
     def on_data(self, payload: bytes, references: list[Any]) -> tuple[bytes, list[Any]]:
@@ -29,4 +34,4 @@ class DeephavenFigureConnection(MessageStream):
         """
         Close the connection
         """
-        pass
+        self._liveness_scope.release()
